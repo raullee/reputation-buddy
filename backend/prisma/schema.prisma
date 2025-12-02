@@ -1,0 +1,336 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                String              @id @default(uuid())
+  businessName      String
+  email             String              @unique
+  phone             String?
+  website           String?
+  industry          String
+  country           String
+  timezone          String              @default("UTC")
+  gpsLatitude       Float?
+  gpsLongitude      Float?
+  stripeCustomerId  String?             @unique
+  plan              SubscriptionPlan    @default(LITE)
+  status            TenantStatus        @default(TRIAL)
+  trialEndsAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  locations         Location[]
+  users             User[]
+  mentions          Mention[]
+  vouchers          Voucher[]
+  reports           Report[]
+  subscription      Subscription?
+  
+  @@index([email])
+  @@index([stripeCustomerId])
+}
+
+model User {
+  id            String       @id @default(uuid())
+  tenantId      String
+  email         String       @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole     @default(STAFF)
+  isActive      Boolean      @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  replies       Reply[]
+  auditLogs     AuditLog[]
+  
+  @@index([tenantId])
+  @@index([email])
+}
+
+model Subscription {
+  id                String              @id @default(uuid())
+  tenantId          String              @unique
+  plan              SubscriptionPlan
+  status            SubscriptionStatus
+  stripeSubscriptionId String?          @unique
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean          @default(false)
+  trialEndsAt          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([stripeSubscriptionId])
+}
+
+model Location {
+  id                String       @id @default(uuid())
+  tenantId          String
+  name              String
+  address           String?
+  city              String
+  country           String
+  gpsLatitude       Float?
+  gpsLongitude      Float?
+  googlePlaceId     String?      @unique
+  phone             String?
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sources           SourceAccount[]
+  mentions          Mention[]
+  
+  @@index([tenantId])
+  @@index([googlePlaceId])
+}
+
+model SourceAccount {
+  id                String          @id @default(uuid())
+  locationId        String
+  platform          Platform
+  accountUrl        String
+  accountId         String?
+  username          String?
+  isActive          Boolean         @default(true)
+  lastScrapedAt     DateTime?
+  scrapingFrequency Int             @default(360) // minutes
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  location          Location        @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  mentions          Mention[]
+  
+  @@unique([locationId, platform, accountUrl])
+  @@index([locationId])
+  @@index([platform])
+}
+
+model Mention {
+  id                  String          @id @default(uuid())
+  tenantId            String
+  locationId          String
+  sourceAccountId     String
+  platform            Platform
+  externalId          String
+  url                 String
+  authorName          String?
+  authorAvatar        String?
+  text                String          @db.Text
+  stars               Float?
+  mediaUrls           String[]
+  language            String?
+  sentiment           Sentiment?
+  intent              String?
+  topics              String[]
+  riskScore           Int?
+  viralityProbability Float?
+  confidence          Float?
+  status              MentionStatus   @default(NEW)
+  publishedAt         DateTime
+  processedAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location            Location        @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  sourceAccount       SourceAccount   @relation(fields: [sourceAccountId], references: [id], onDelete: Cascade)
+  replies             Reply[]
+  evidences           Evidence[]
+  auditLogs           AuditLog[]
+  
+  @@unique([platform, externalId])
+  @@index([tenantId])
+  @@index([locationId])
+  @@index([sourceAccountId])
+  @@index([status])
+  @@index([riskScore])
+  @@index([publishedAt])
+}
+
+model Reply {
+  id                String       @id @default(uuid())
+  mentionId         String
+  userId            String
+  suggestedText     String       @db.Text
+  approvedText      String?      @db.Text
+  tone              String?
+  status            ReplyStatus  @default(DRAFT)
+  postedAt          DateTime?
+  externalReplyId   String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  mention           Mention      @relation(fields: [mentionId], references: [id], onDelete: Cascade)
+  user              User         @relation(fields: [userId], references: [id])
+  
+  @@index([mentionId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Voucher {
+  id                String         @id @default(uuid())
+  tenantId          String
+  mentionId         String?
+  code              String         @unique
+  customerName      String
+  customerEmail     String?
+  customerPhone     String?
+  value             Float
+  currency          String         @default("USD")
+  status            VoucherStatus  @default(ISSUED)
+  issuedAt          DateTime       @default(now())
+  redeemedAt        DateTime?
+  expiresAt         DateTime
+  metadata          Json?
+  
+  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([code])
+  @@index([status])
+}
+
+model Evidence {
+  id                String       @id @default(uuid())
+  mentionId         String
+  fileUrl           String
+  fileName          String
+  fileType          String
+  fileSize          Int
+  uploadedAt        DateTime     @default(now())
+  
+  mention           Mention      @relation(fields: [mentionId], references: [id], onDelete: Cascade)
+  
+  @@index([mentionId])
+}
+
+model Report {
+  id                String       @id @default(uuid())
+  tenantId          String
+  type              ReportType
+  period            String       // e.g., "2023-10", "2023-W42"
+  fileUrl           String
+  generatedAt       DateTime     @default(now())
+  
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([type])
+}
+
+model AuditLog {
+  id                String       @id @default(uuid())
+  tenantId          String?
+  userId            String?
+  mentionId         String?
+  action            String
+  entityType        String
+  entityId          String?
+  metadata          Json?
+  ipAddress         String?
+  userAgent         String?
+  timestamp         DateTime     @default(now())
+  
+  user              User?        @relation(fields: [userId], references: [id])
+  mention           Mention?     @relation(fields: [mentionId], references: [id])
+  
+  @@index([tenantId])
+  @@index([userId])
+  @@index([timestamp])
+}
+
+enum SubscriptionPlan {
+  LITE
+  PRO
+  MAX
+}
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  UNPAID
+}
+
+enum UserRole {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum Platform {
+  GOOGLE
+  FACEBOOK
+  INSTAGRAM
+  TIKTOK
+  TWITTER
+  REDDIT
+  YELP
+  TRIPADVISOR
+  GRABFOOD
+  FOODPANDA
+  OPENTABLE
+  TRUSTPILOT
+  FORUM
+  OTHER
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum MentionStatus {
+  NEW
+  REVIEWED
+  REPLIED
+  ESCALATED
+  ARCHIVED
+}
+
+enum ReplyStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  REJECTED
+}
+
+enum VoucherStatus {
+  ISSUED
+  REDEEMED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReportType {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
